@@ -1,0 +1,66 @@
+name: Crypto Market Monitor
+
+on:
+  workflow_dispatch:
+  schedule:
+    # 09:25 Asia/Shanghai (01:25 UTC), Monday-Friday China.
+    - cron: '25 1 * * 1-5'
+    # 09:25 New York: EDT 13:25 UTC, EST 14:25 UTC.
+    # 16:25 New York: EDT 20:25 UTC, EST 21:25 UTC.
+    - cron: '25 13,14,20,21 * * 1-5'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: crypto-market-monitor
+  cancel-in-progress: false
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check session and daylight saving time
+        id: gate
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          python - <<'PY'
+          import os
+          from datetime import datetime, timezone
+          from zoneinfo import ZoneInfo
+          now = datetime.now(timezone.utc)
+          china = now.astimezone(ZoneInfo('Asia/Shanghai'))
+          ny = now.astimezone(ZoneInfo('America/New_York'))
+          manual = os.environ['EVENT_NAME'] == 'workflow_dispatch'
+          # Allow a 40-minute window after planned :25 UTC trigger for scheduler delays.
+          # China's open at 09:30; US open at 09:30, close at 16:30.
+          def near(t, hour, minute=25):
+              return t.weekday() < 5 and t.hour == hour and minute <= t.minute <= 59
+          valid = manual or near(china, 9) or near(ny, 9) or near(ny, 16)
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+              f.write(f'run={str(valid).lower()}\n')
+          print(f'UTC={now.isoformat()} Shanghai={china.isoformat()} NY={ny.isoformat()} run={valid}')
+          PY
+      - uses: actions/setup-python@v5
+        if: steps.gate.outputs.run == 'true'
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+      - name: Install dependencies
+        if: steps.gate.outputs.run == 'true'
+        run: python -m pip install -r requirements.txt
+      - name: Collect market data
+        if: steps.gate.outputs.run == 'true'
+        run: python crypto_monitor.py
+      - name: Publish latest report
+        if: steps.gate.outputs.run == 'true'
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add output/latest.json output/latest.html output/latest_technicals.csv output/latest_derivatives.csv
+          if ! git diff --cached --quiet; then
+            git commit -m 'Update market monitor report'
+            git push
+          fi
