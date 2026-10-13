@@ -1,0 +1,10 @@
+{
+  "symbols": ["BTCUSDT", "ETHUSDT", "SOLUSDT", "ZECUSDT", "HYPEUSDT"],
+  "intervals": ["1h", "4h"],
+  "api_base": "https://fapi.binance.com",
+  "kline_limit": 500,
+  "request_timeout_seconds": 20,
+  "request_pause_seconds": 0.2,
+  "output_directory": "output",
+  "database": "output/crypto_monitor.sqlite3"
+}
